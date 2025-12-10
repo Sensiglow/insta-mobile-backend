@@ -9,26 +9,27 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Multi-Server System Running! Radhe Radhe! 🙏');
+    res.send('Universal Server Running! Radhe Radhe! 🙏');
 });
 
-// বিভিন্ন সার্ভারের তালিকা (একটা না চললে অন্যটা চলবে)
-const COBALT_INSTANCES = [
-    'https://cobalt.zuu.pl/api/json',        // সার্ভার ১
-    'https://api.cobalt.tools/api/json',     // সার্ভার ২ (অফিসিয়াল)
-    'https://cobalt.lacus.icu/api/json',     // সার্ভার ৩
-    'https://api.wuk.sh/api/json'            // সার্ভার ৪
+// ৫টি ভিন্ন ভিন্ন সার্ভারের লিস্ট (একটাই যথেষ্ট)
+const API_SERVERS = [
+    'https://cobalt.zuu.pl/api/json',        // সার্ভার ১ (খুবই ফাস্ট)
+    'https://cobalt.lacus.icu/api/json',     // সার্ভার ২
+    'https://api.cobalt.tools/api/json',     // সার্ভার ৩ (অফিসিয়াল)
+    'https://cobalt.q114.toolforge.org/api/json', // সার্ভার ৪
+    'https://api.wuk.sh/api/json'            // সার্ভার ৫
 ];
 
 async function getVideo(url) {
     let lastError = null;
 
-    // লুপ চালিয়ে সব সার্ভার চেক করা
-    for (const apiBase of COBALT_INSTANCES) {
-        console.log(`🚀 Trying server: ${apiBase}`);
+    // লুপ চালিয়ে একটা একটা করে সার্ভার চেক করবে
+    for (const server of API_SERVERS) {
+        console.log(`🚀 Trying server: ${server}`);
 
         try {
-            const response = await axios.post(apiBase, {
+            const response = await axios.post(server, {
                 url: url,
                 vCodec: "h264",
                 vQuality: "720",
@@ -42,27 +43,26 @@ async function getVideo(url) {
                     'Origin': 'https://cobalt.tools',
                     'Referer': 'https://cobalt.tools/'
                 },
-                timeout: 10000 // ১০ সেকেন্ড অপেক্ষা করবে সর্বোচ্চ
+                timeout: 8000 // ৮ সেকেন্ডের বেশি সময় নিলে পরেরটায় যাবে
             });
 
             const data = response.data;
-            console.log(`✅ Success from ${apiBase}:`, data.status);
 
             if (data.status === 'stream' || data.status === 'redirect') {
+                console.log(`✅ Success from: ${server}`);
                 return { video: data.url, thumbnail: "" };
             } 
             else if (data.status === 'picker') {
+                console.log(`✅ Success (Picker) from: ${server}`);
                 return { video: data.picker[0].url, thumbnail: data.picker[0].thumb || "" };
             }
 
         } catch (error) {
-            console.error(`❌ Failed ${apiBase}:`, error.message);
-            lastError = error;
-            // লুপ কন্টিনিউ করবে পরের সার্ভারের জন্য
+            console.error(`❌ Failed ${server}`);
+            // লুপ থামবে না, পরের সার্ভারে যাবে
         }
     }
 
-    // যদি সব সার্ভার ফেল করে
     throw new Error("All servers are busy. Please try again later.");
 }
 
@@ -82,7 +82,7 @@ app.post('/download', async (req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({ success: false, error: "Server Busy. Try again." });
+        res.status(500).json({ success: false, error: "Server Busy. Please try again." });
     }
 });
 
