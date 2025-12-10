@@ -8,64 +8,58 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Server is Running! Radhe Radhe! 🙏');
+    res.send('Bypass Server is Running! Radhe Radhe! 🙏');
 });
 
-// ভিডিও খোঁজার জাদুকরী ফাংশন (Embed Method)
-async function getInstagramVideo(url) {
-    console.log("🔍 Trying Embed Method for:", url);
-
-    // ১. লিংকের শেষে /embed/captioned যোগ করা (এটি ব্লক এড়াতে সাহায্য করে)
-    // লিংক ক্লিন করা (query params বাদ দেওয়া)
-    const cleanUrl = url.split('?')[0].replace(/\/$/, '');
-    const embedUrl = `${cleanUrl}/embed/captioned`;
-
-    console.log("🔗 Fetching:", embedUrl);
+// Cobalt API ব্যবহার করে ভিডিও আনার ফাংশন
+async function getVideoFromCobalt(url) {
+    console.log("🚀 Sending request to Cobalt API for:", url);
 
     const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    };
+
+    const body = {
+        url: url,
+        vCodec: "h264",
+        vQuality: "720",
+        aFormat: "mp3",
+        filenamePattern: "classic"
     };
 
     try {
-        const response = await fetch(embedUrl, { headers });
-        if (!response.ok) throw new Error("Embed Page Blocked");
+        // আমরা Cobalt এর পাবলিক সার্ভার ব্যবহার করছি
+        const response = await fetch('https://api.cobalt.tools/api/json', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(body)
+        });
 
-        const html = await response.text();
+        const data = await response.json();
 
-        // ২. ভিডিও লিংক খোঁজা (mp4)
-        // Embed পেজে ভিডিও লিংকটি video_url এর মধ্যে থাকে
-        let videoUrl = null;
-        
-        // Regex দিয়ে video_url বের করা
-        const videoMatch = html.match(/"video_url":"([^"]+)"/);
-        if (videoMatch && videoMatch[1]) {
-            videoUrl = videoMatch[1].replace(/\\u0026/g, '&');
+        console.log("✅ Cobalt Response:", data.status);
+
+        if (data.status === 'stream' || data.status === 'redirect') {
+            return {
+                video: data.url,
+                thumbnail: "" // Cobalt থাম্বনেইল দেয় না, তাই আমরা ভিডিও থেকেই থাম্বনেইল দেখাব ফ্রন্টএন্ডে
+            };
         } 
-        // যদি ওভাবে না পায়, সরাসরি .mp4 খুঁজবে
+        else if (data.status === 'picker') {
+            // যদি একাধিক ভিডিও থাকে (Carousel)
+            return {
+                video: data.picker[0].url,
+                thumbnail: data.picker[0].thumb || ""
+            };
+        } 
         else {
-            const mp4Match = html.match(/src="([^"]+\.mp4[^"]*)"/);
-            if (mp4Match && mp4Match[1]) {
-                videoUrl = mp4Match[1].replace(/&amp;/g, '&');
-            }
-        }
-
-        // ৩. ছবি খোঁজা (Thumbnail)
-        let imageUrl = "";
-        const imgMatch = html.match(/"poster_url":"([^"]+)"/);
-        if (imgMatch && imgMatch[1]) {
-            imageUrl = imgMatch[1].replace(/\\u0026/g, '&');
-        }
-
-        if (videoUrl) {
-            console.log("✅ Video Found via Embed!");
-            return { type: 'video', url: videoUrl, thumb: imageUrl };
-        } else {
-            throw new Error("No video found in embed data");
+            throw new Error("Download failed via API");
         }
 
     } catch (error) {
-        console.log("❌ Embed method failed:", error.message);
-        throw new Error("Could not fetch video. Instagram is restricting access.");
+        console.error("❌ API Error:", error.message);
+        throw new Error("Failed to fetch video. Try again.");
     }
 }
 
@@ -74,15 +68,23 @@ app.post('/download', async (req, res) => {
     if (!url) return res.status(400).json({ error: "URL Required" });
 
     try {
-        const result = await getInstagramVideo(url);
-        res.json({ success: true, data: result });
+        const result = await getVideoFromCobalt(url);
+        
+        res.json({
+            success: true,
+            data: {
+                video: result.video,
+                thumbnail: result.thumbnail // ভিডিও লোড না হলে ডিফল্ট আইকন দেখাবে
+            }
+        });
+
     } catch (error) {
-        console.error("❌ Error:", error.message);
-        res.status(500).json({ success: false, error: "Video not found or Private" });
+        console.error("❌ Final Error:", error.message);
+        res.status(500).json({ success: false, error: "Server Busy. Please try again." });
     }
 });
 
-// স্ট্রিম ফাংশন (ডাইরেক্ট ডাউনলোডের জন্য)
+// ডাইরেক্ট ডাউনলোড স্ট্রিম
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
     if (!fileUrl) return res.status(400).send("No URL");
