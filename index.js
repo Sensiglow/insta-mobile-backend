@@ -5,19 +5,38 @@ const instagramGetUrl = require("instagram-url-direct");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// ১. খুব শক্তিশালী CORS সেটআপ (যাতে কানেকশন কেউ না আটকায়)
+app.use(cors({
+    origin: '*', // সবাইকে অনুমতি দিলাম
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type']
+}));
+
 app.use(express.json());
 
+// ২. সার্ভার বেঁচে আছে কিনা চেক করার রুট
 app.get('/', (req, res) => {
-    res.send('Mobile Backend Running!');
+    res.send('Server is SUPER LIVE!');
 });
 
+// ৩. ডাউনলোড রুট (লগ সহ)
 app.post('/download', async (req, res) => {
+    console.log("🔴 RENDER LOG: Request এসেছে!"); // রিকোয়েস্ট আসলে এটা দেখাবে
+    
     const { url } = req.body;
-    if (!url) return res.status(400).json({ error: "URL Required" });
+    console.log("User URL দিয়েছে:", url);
+
+    if (!url) {
+        console.log("ভুল: URL নেই");
+        return res.status(400).json({ error: "URL is required" });
+    }
 
     try {
+        console.log("Instagram থেকে ডেটা আনার চেষ্টা চলছে...");
         const links = await instagramGetUrl(url);
+        
+        console.log("✅ সফল! ডেটা পাওয়া গেছে।");
+        
         if (links.url_list.length > 0) {
             res.json({
                 success: true,
@@ -27,11 +46,14 @@ app.post('/download', async (req, res) => {
                 }
             });
         } else {
-            res.status(404).json({ success: false, error: "Not found" });
+            console.log("❌ ডেটা ফাঁকা এসেছে।");
+            res.status(404).json({ success: false, error: "Video not found/Private" });
         }
+
     } catch (error) {
-        res.status(500).json({ success: false, error: "Server Error" });
+        console.error("❌ মারাত্মক এরর:", error); // আসল সমস্যা এখানে দেখা যাবে
+        res.status(500).json({ success: false, error: "Internal Error: " + error.message });
     }
 });
 
-app.listen(PORT, () => console.log(`Server running`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
