@@ -9,80 +9,68 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Facebook Robot Server Running! Radhe Radhe! 🙏');
+    res.send('Fixed Server Running! Radhe Radhe! 🙏');
 });
 
-async function getInstagramData(url) {
-    console.log("🔍 Facebook Robot Scanning:", url);
+// সার্ভার লিস্ট
+const API_SERVERS = [
+    'https://cobalt.zuu.pl/api/json',
+    'https://api.cobalt.tools/api/json',
+    'https://cobalt.lacus.icu/api/json',
+    'https://api.wuk.sh/api/json'
+];
 
-    // ১. আমরা সাজব ফেসবুকের রোবট (যাতে ব্লক না করে)
-    const headers = {
-        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5'
-    };
+async function getVideo(url) {
+    for (const server of API_SERVERS) {
+        console.log(`🚀 Trying server: ${server}`);
+        try {
+            const response = await axios.post(server, {
+                url: url,
+                vCodec: "h264",
+                vQuality: "720",
+                filenamePattern: "classic",
+                isAudioOnly: false
+            }, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Origin': 'https://cobalt.tools',
+                    'Referer': 'https://cobalt.tools/'
+                },
+                timeout: 10000
+            });
 
-    try {
-        const response = await axios.get(url, { headers });
-        const html = response.data;
+            const data = response.data;
 
-        // ২. ভিডিও খোঁজার পালা (Deep Scan)
-        let videoUrl = null;
+            // ১. যদি সরাসরি ভিডিও দেয় (Stream/Redirect)
+            if (data.status === 'stream' || data.status === 'redirect') {
+                return { type: 'video', video: data.url, thumbnail: "" };
+            } 
+            // ২. যদি পিকার (Picker) দেয় - এখানেই আসল ফিক্স
+            else if (data.status === 'picker') {
+                let videoLink = null;
+                let imageLink = null;
 
-        // পদ্ধতি ১: সরাসরি .mp4 লিংক খোঁজা (সবচেয়ে শক্তিশালী পদ্ধতি)
-        // এই Regex টি পুরো HTML ঘেঁটে mp4 লিংক বের করবে
-        const mp4Match = html.match(/https?:\/\/[^"']+\.mp4[^"']*/g);
-        
-        if (mp4Match && mp4Match.length > 0) {
-            // প্রথম লিংকটাই সাধারণত আসল ভিডিও হয়
-            videoUrl = mp4Match[0];
-            console.log("✅ Found .mp4 directly!");
-        }
+                // লুপ চালিয়ে ভিডিও খোঁজা
+                data.picker.forEach(item => {
+                    if (item.type === 'video') videoLink = item.url;
+                    if (item.type === 'photo') imageLink = item.url;
+                });
 
-        // পদ্ধতি ২: যদি .mp4 না পায়, তখন video_url ট্যাগ খোঁজা
-        if (!videoUrl) {
-            const jsonMatch = html.match(/"video_url":"([^"]+)"/);
-            if (jsonMatch && jsonMatch[1]) {
-                videoUrl = jsonMatch[1];
+                // ভিডিও পেলে ভিডিও, না হলে ছবি
+                if (videoLink) {
+                    return { type: 'video', video: videoLink, thumbnail: data.picker[0].thumb || "" };
+                } else if (imageLink) {
+                    return { type: 'photo', video: imageLink, thumbnail: imageLink };
+                }
             }
-        }
 
-        // পদ্ধতি ৩: মেটা ট্যাগ খোঁজা
-        if (!videoUrl) {
-            const metaMatch = html.match(/<meta property="og:video" content="([^"]+)"/i);
-            if (metaMatch && metaMatch[1]) {
-                videoUrl = metaMatch[1];
-            }
+        } catch (error) {
+            console.error(`❌ Failed ${server}:`, error.message);
         }
-
-        // ৩. ছবি খোঁজা (থাম্বনেইল)
-        let imageUrl = "";
-        const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
-        if (imgMatch && imgMatch[1]) {
-            imageUrl = imgMatch[1];
-        }
-
-        // ৪. রেজাল্ট তৈরি করা
-        if (videoUrl) {
-            // লিংক ক্লিন করা (Unicode \u0026 বা &amp; থাকলে ঠিক করা)
-            videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-            imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-            
-            return { type: 'video', url: videoUrl, thumb: imageUrl };
-        } 
-        else if (imageUrl) {
-            // ভিডিও না পেলে ছবি
-            imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-            return { type: 'photo', url: imageUrl, thumb: imageUrl };
-        } 
-        else {
-            throw new Error("No media found. Account might be Private.");
-        }
-
-    } catch (error) {
-        console.error("❌ Error:", error.message);
-        throw new Error("Failed to fetch. Instagram might be restricting.");
     }
+    throw new Error("All servers busy.");
 }
 
 app.post('/download', async (req, res) => {
@@ -90,25 +78,25 @@ app.post('/download', async (req, res) => {
     if (!url) return res.status(400).json({ error: "URL Required" });
 
     try {
-        const result = await getInstagramData(url);
-        
+        const result = await getVideo(url);
         res.json({
             success: true,
             data: {
-                video: result.url,
-                thumbnail: result.thumb,
-                type: result.type // ফ্রন্টএন্ড বুঝবে এটা ভিডিও না ছবি
+                video: result.video,
+                thumbnail: result.thumbnail,
+                type: result.type // ভিডিও না ফটো সেটা ফ্রন্টএন্ডকে বলে দিচ্ছি
             }
         });
-
     } catch (error) {
-        res.status(500).json({ success: false, error: "Server Busy or Private Video." });
+        res.status(500).json({ success: false, error: "Server Busy. Try again." });
     }
 });
 
-// ডাইরেক্ট ডাউনলোড স্ট্রিম
+// ডাইরেক্ট ডাউনলোড স্ট্রিম (ফাইল সেভ করার জন্য)
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
+    const type = req.query.type || 'video';
+    
     if (!fileUrl) return res.status(400).send("No URL");
 
     try {
@@ -118,11 +106,17 @@ app.get('/stream', async (req, res) => {
             responseType: 'stream'
         });
 
-        res.setHeader('Content-Disposition', `attachment; filename="insta_${Date.now()}.mp4"`);
-        res.setHeader('Content-Type', 'video/mp4');
+        // ফাইলের নাম ও টাইপ সেট করা
+        const ext = type === 'photo' ? 'jpg' : 'mp4';
+        const contentType = type === 'photo' ? 'image/jpeg' : 'video/mp4';
+
+        res.setHeader('Content-Disposition', `attachment; filename="instasaver_${Date.now()}.${ext}"`);
+        res.setHeader('Content-Type', contentType);
+        
         response.data.pipe(res);
+
     } catch (error) {
-        res.status(500).send("Stream Error");
+        res.status(500).send("Error downloading file");
     }
 });
 
