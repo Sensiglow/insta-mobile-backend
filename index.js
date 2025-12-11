@@ -9,28 +9,27 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Aggressive Server Running! Radhe Radhe! 🙏');
+    res.send('US Session Server Active! Radhe Radhe! 🙏');
 });
 
 // **********************************************************
-// আপনার Session ID (যেমন আছে তেমনই থাক)
+// আপনার নতুন আমেরিকান Session ID (আমি বসিয়ে দিয়েছি)
 // **********************************************************
-const RAW_SESSION_ID = "79712128620%3AtQPz0VzkjZreXf%3A5%3AAYiK33MTyLQ9hTMpf5lt6pXhTAPaDn5gifALYQEUNg"; 
+const RAW_SESSION_ID = "79630939794:kzcTqdY4zvT8vX:27:AYj0BSlNTQ_SRrB57qq-6Pp42Yu7caxHu32PfgVUwA"; 
 // **********************************************************
 
+// ডিকোড করা (যাতে কোনো ভুল ফরম্যাট থাকলেও ঠিক হয়ে যায়)
 const REAL_SESSION_ID = decodeURIComponent(RAW_SESSION_ID);
 
 async function getInstagramData(url) {
-    console.log("🔍 Scanning:", url);
+    console.log("🔍 Scanning with US ID:", url);
 
     const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
         'Cookie': `sessionid=${REAL_SESSION_ID};`,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-Site': 'same-origin',
         'Upgrade-Insecure-Requests': '1'
     };
 
@@ -41,65 +40,58 @@ async function getInstagramData(url) {
         let videoUrl = null;
         let imageUrl = null;
 
-        // ==========================================
-        // 🔴 স্টেপ ১: ভিডিও খোঁজার সবচেয়ে শক্তিশালী উপায় (video_versions)
-        // ==========================================
-        // রিলস ভিডিও সাধারণত video_versions এর ভেতর থাকে
+        // 🔴 ভিডিও খোঁজার ৪টি ধাপ (যাতে মিস না হয়)
+
+        // ১. video_versions (সবচেয়ে শক্তিশালী - রিলসের জন্য)
         const versionsMatch = html.match(/"video_versions":\[.*?{"type":\d+,"url":"([^"]+)"/);
         if (versionsMatch && versionsMatch[1]) {
             console.log("✅ Video found in versions!");
             videoUrl = versionsMatch[1];
         }
 
-        // ==========================================
-        // 🔴 স্টেপ ২: যদি না পায়, সরাসরি .mp4 খোঁজা (Brute Force)
-        // ==========================================
-        if (!videoUrl) {
-            // পুরো HTML ঘেঁটে mp4 বের করা
-            const mp4Match = html.match(/https?:\/\/[^"']+\.mp4/);
-            if (mp4Match && mp4Match[0]) {
-                console.log("✅ Video found by Force Search!");
-                videoUrl = mp4Match[0];
-            }
-        }
-
-        // ==========================================
-        // 🔴 স্টেপ ৩: সাধারণ মেটা ট্যাগ
-        // ==========================================
+        // ২. og:video (ব্যাকআপ)
         if (!videoUrl) {
             const metaMatch = html.match(/<meta property="og:video" content="([^"]+)"/i);
-            if (metaMatch && metaMatch[1]) {
-                videoUrl = metaMatch[1];
-            }
+            if (metaMatch && metaMatch[1]) videoUrl = metaMatch[1];
+        }
+
+        // ৩. video_url (JSON)
+        if (!videoUrl) {
+            const jsonMatch = html.match(/"video_url":"([^"]+)"/);
+            if (jsonMatch && jsonMatch[1]) videoUrl = jsonMatch[1];
+        }
+
+        // ৪. ডাইরেক্ট .mp4 খোঁজা (শেষ চেষ্টা)
+        if (!videoUrl) {
+            const mp4Match = html.match(/https?:\/\/[^"']+\.mp4/);
+            if (mp4Match && mp4Match[0]) videoUrl = mp4Match[0];
         }
 
         // ছবি খোঁজা
         const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
-        if (imgMatch && imgMatch[1]) {
-            imageUrl = imgMatch[1];
-        }
+        if (imgMatch && imgMatch[1]) imageUrl = imgMatch[1];
 
         // রেজাল্ট রিটার্ন
         if (videoUrl) {
-            // লিংক ক্লিন করা
+            // লিংক ক্লিন করা (Unicode fix)
             videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             imageUrl = imageUrl ? imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&') : "";
             
             return { type: 'video', video: videoUrl, thumbnail: imageUrl };
         } 
         else if (imageUrl) {
-            // যদি ভিডিও কোনোভাবেই না পায়, তখন ছবি
-            console.log("⚠️ Still only photo found. Likely Geo-blocked.");
+            console.log("⚠️ Still only Photo found.");
             imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             return { type: 'photo', video: imageUrl, thumbnail: imageUrl };
         } 
         else {
+            if(html.includes("login")) throw new Error("Session Expired/Login Required");
             throw new Error("No media found.");
         }
 
     } catch (error) {
         console.error("❌ Error:", error.message);
-        throw new Error("Failed to fetch.");
+        throw new Error("Instagram Blocked Request.");
     }
 }
 
@@ -109,15 +101,13 @@ app.post('/download', async (req, res) => {
 
     try {
         const result = await getInstagramData(url);
-        res.json({
-            success: true,
-            data: result
-        });
+        res.json({ success: true, data: result });
     } catch (error) {
         res.status(500).json({ success: false, error: "Server Error" });
     }
 });
 
+// ডাইরেক্ট স্ট্রিম (ডাউনলোডের জন্য - 0kb ফিক্স)
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
     const type = req.query.type || 'video';
@@ -129,10 +119,7 @@ app.get('/stream', async (req, res) => {
             url: fileUrl,
             method: 'GET',
             responseType: 'stream',
-            headers: {
-                // ভিডিও ডাউনলোড করার সময়ও সেশন ব্যবহার করা
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
 
         const ext = type === 'photo' ? 'jpg' : 'mp4';
@@ -140,9 +127,7 @@ app.get('/stream', async (req, res) => {
 
         res.setHeader('Content-Disposition', `attachment; filename="insta_${Date.now()}.${ext}"`);
         res.setHeader('Content-Type', contentType);
-        
         response.data.pipe(res);
-
     } catch (error) {
         res.status(500).send("Stream Error");
     }
