@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const https = require('https'); // সিকিউরিটি বাইপাস করার জন্য
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,20 +10,25 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Fixed Server Running! Radhe Radhe! 🙏');
+    res.send('Fixed SSL Server Running! Radhe Radhe! 🙏');
 });
 
-// সার্ভার লিস্ট
+// সিকিউরিটি বাধানিষেধ তুলে নেওয়া (SSL Bypass Agent)
+const agent = new https.Agent({  
+  rejectUnauthorized: false 
+});
+
+// সার্ভার লিস্ট (এগুলো এখন কাজ করবে)
 const API_SERVERS = [
-    'https://cobalt.zuu.pl/api/json',
-    'https://api.cobalt.tools/api/json',
-    'https://cobalt.lacus.icu/api/json',
-    'https://api.wuk.sh/api/json'
+    'https://cobalt.lacus.icu/api/json',     // সার্ভার ১
+    'https://cobalt.zuu.pl/api/json',        // সার্ভার ২
+    'https://api.cobalt.tools/api/json',     // সার্ভার ৩
+    'https://api.wuk.sh/api/json'            // সার্ভার ৪
 ];
 
 async function getVideo(url) {
     for (const server of API_SERVERS) {
-        console.log(`🚀 Trying server: ${server}`);
+        console.log(`🚀 Trying server (SSL Bypassed): ${server}`);
         try {
             const response = await axios.post(server, {
                 url: url,
@@ -34,35 +40,30 @@ async function getVideo(url) {
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
                     'Origin': 'https://cobalt.tools',
                     'Referer': 'https://cobalt.tools/'
                 },
+                httpsAgent: agent, // এখানেই আসল ম্যাজিক (সিকিউরিটি বাইপাস)
                 timeout: 10000
             });
 
             const data = response.data;
 
-            // ১. যদি সরাসরি ভিডিও দেয় (Stream/Redirect)
+            // ১. ডাইরেক্ট ভিডিও
             if (data.status === 'stream' || data.status === 'redirect') {
                 return { type: 'video', video: data.url, thumbnail: "" };
             } 
-            // ২. যদি পিকার (Picker) দেয় - এখানেই আসল ফিক্স
+            // ২. পিকার (লিস্ট)
             else if (data.status === 'picker') {
                 let videoLink = null;
-                let imageLink = null;
-
-                // লুপ চালিয়ে ভিডিও খোঁজা
+                // ভিডিও খোঁজা
                 data.picker.forEach(item => {
                     if (item.type === 'video') videoLink = item.url;
-                    if (item.type === 'photo') imageLink = item.url;
                 });
 
-                // ভিডিও পেলে ভিডিও, না হলে ছবি
                 if (videoLink) {
-                    return { type: 'video', video: videoLink, thumbnail: data.picker[0].thumb || "" };
-                } else if (imageLink) {
-                    return { type: 'photo', video: imageLink, thumbnail: imageLink };
+                    return { type: 'video', video: videoLink, thumbnail: "" };
                 }
             }
 
@@ -79,23 +80,24 @@ app.post('/download', async (req, res) => {
 
     try {
         const result = await getVideo(url);
+        
         res.json({
             success: true,
             data: {
                 video: result.video,
                 thumbnail: result.thumbnail,
-                type: result.type // ভিডিও না ফটো সেটা ফ্রন্টএন্ডকে বলে দিচ্ছি
+                type: result.type
             }
         });
+
     } catch (error) {
         res.status(500).json({ success: false, error: "Server Busy. Try again." });
     }
 });
 
-// ডাইরেক্ট ডাউনলোড স্ট্রিম (ফাইল সেভ করার জন্য)
+// ডাইরেক্ট ডাউনলোড স্ট্রিম
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
-    const type = req.query.type || 'video';
     
     if (!fileUrl) return res.status(400).send("No URL");
 
@@ -103,20 +105,17 @@ app.get('/stream', async (req, res) => {
         const response = await axios({
             url: fileUrl,
             method: 'GET',
-            responseType: 'stream'
+            responseType: 'stream',
+            httpsAgent: agent // স্ট্রিমিং এর সময়ও সিকিউরিটি বাইপাস
         });
 
-        // ফাইলের নাম ও টাইপ সেট করা
-        const ext = type === 'photo' ? 'jpg' : 'mp4';
-        const contentType = type === 'photo' ? 'image/jpeg' : 'video/mp4';
-
-        res.setHeader('Content-Disposition', `attachment; filename="instasaver_${Date.now()}.${ext}"`);
-        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="insta_${Date.now()}.mp4"`);
+        res.setHeader('Content-Type', 'video/mp4');
         
         response.data.pipe(res);
 
     } catch (error) {
-        res.status(500).send("Error downloading file");
+        res.status(500).send("Stream Error");
     }
 });
 
