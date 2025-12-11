@@ -9,27 +9,28 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Fixed Session Server Running! Radhe Radhe! 🙏');
+    res.send('Aggressive Server Running! Radhe Radhe! 🙏');
 });
 
 // **********************************************************
-// আপনার কপি করা Session ID (যেমন আছে তেমনই থাক)
+// আপনার Session ID (যেমন আছে তেমনই থাক)
 // **********************************************************
 const RAW_SESSION_ID = "79712128620%3AtQPz0VzkjZreXf%3A5%3AAYiK33MTyLQ9hTMpf5lt6pXhTAPaDn5gifALYQEUNg"; 
 // **********************************************************
 
-// সেশন আইডি ঠিক করার লজিক
 const REAL_SESSION_ID = decodeURIComponent(RAW_SESSION_ID);
 
 async function getInstagramData(url) {
-    console.log("🔍 Fetching with Session ID:", REAL_SESSION_ID.substring(0, 10) + "...");
+    console.log("🔍 Scanning:", url);
 
     const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-        'Cookie': `sessionid=${REAL_SESSION_ID};`, // এখন সঠিক আইডি যাবে
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Cookie': `sessionid=${REAL_SESSION_ID};`,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
         'Upgrade-Insecure-Requests': '1'
     };
 
@@ -40,13 +41,31 @@ async function getInstagramData(url) {
         let videoUrl = null;
         let imageUrl = null;
 
-        // ১. video_url খোঁজা (JSON)
-        const videoMatch = html.match(/"video_url":"([^"]+)"/);
-        if (videoMatch && videoMatch[1]) {
-            videoUrl = videoMatch[1];
+        // ==========================================
+        // 🔴 স্টেপ ১: ভিডিও খোঁজার সবচেয়ে শক্তিশালী উপায় (video_versions)
+        // ==========================================
+        // রিলস ভিডিও সাধারণত video_versions এর ভেতর থাকে
+        const versionsMatch = html.match(/"video_versions":\[.*?{"type":\d+,"url":"([^"]+)"/);
+        if (versionsMatch && versionsMatch[1]) {
+            console.log("✅ Video found in versions!");
+            videoUrl = versionsMatch[1];
         }
 
-        // ২. og:video খোঁজা
+        // ==========================================
+        // 🔴 স্টেপ ২: যদি না পায়, সরাসরি .mp4 খোঁজা (Brute Force)
+        // ==========================================
+        if (!videoUrl) {
+            // পুরো HTML ঘেঁটে mp4 বের করা
+            const mp4Match = html.match(/https?:\/\/[^"']+\.mp4/);
+            if (mp4Match && mp4Match[0]) {
+                console.log("✅ Video found by Force Search!");
+                videoUrl = mp4Match[0];
+            }
+        }
+
+        // ==========================================
+        // 🔴 স্টেপ ৩: সাধারণ মেটা ট্যাগ
+        // ==========================================
         if (!videoUrl) {
             const metaMatch = html.match(/<meta property="og:video" content="([^"]+)"/i);
             if (metaMatch && metaMatch[1]) {
@@ -54,23 +73,14 @@ async function getInstagramData(url) {
             }
         }
 
-        // ৩. Deep Search (video_versions) - রিলস এর জন্য শক্তিশালী
-        if (!videoUrl) {
-            const deepMatch = html.match(/"video_versions":\[\{"type":\d+,"url":"([^"]+)"/);
-            if (deepMatch && deepMatch[1]) {
-                videoUrl = deepMatch[1];
-            }
-        }
-
-        // ৪. ছবি খোঁজা
+        // ছবি খোঁজা
         const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
         if (imgMatch && imgMatch[1]) {
             imageUrl = imgMatch[1];
         }
 
-        // রেজাল্ট তৈরি
+        // রেজাল্ট রিটার্ন
         if (videoUrl) {
-            console.log("✅ Video Found!");
             // লিংক ক্লিন করা
             videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             imageUrl = imageUrl ? imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&') : "";
@@ -78,20 +88,18 @@ async function getInstagramData(url) {
             return { type: 'video', video: videoUrl, thumbnail: imageUrl };
         } 
         else if (imageUrl) {
-            console.log("⚠️ Only Photo Found. Check Session validity.");
+            // যদি ভিডিও কোনোভাবেই না পায়, তখন ছবি
+            console.log("⚠️ Still only photo found. Likely Geo-blocked.");
             imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             return { type: 'photo', video: imageUrl, thumbnail: imageUrl };
         } 
         else {
-            if(html.includes("login")) {
-                throw new Error("Session ID Expired or Invalid.");
-            }
             throw new Error("No media found.");
         }
 
     } catch (error) {
         console.error("❌ Error:", error.message);
-        throw new Error("Failed to fetch. Instagram blocked request.");
+        throw new Error("Failed to fetch.");
     }
 }
 
@@ -106,11 +114,10 @@ app.post('/download', async (req, res) => {
             data: result
         });
     } catch (error) {
-        res.status(500).json({ success: false, error: "Server Error: " + error.message });
+        res.status(500).json({ success: false, error: "Server Error" });
     }
 });
 
-// ডাইরেক্ট ডাউনলোড স্ট্রিম
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
     const type = req.query.type || 'video';
@@ -123,6 +130,7 @@ app.get('/stream', async (req, res) => {
             method: 'GET',
             responseType: 'stream',
             headers: {
+                // ভিডিও ডাউনলোড করার সময়ও সেশন ব্যবহার করা
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
             }
         });
