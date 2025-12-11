@@ -9,21 +9,24 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Instagram Server Running! Radhe Radhe! 🙏');
+    res.send('Fixed Session Server Running! Radhe Radhe! 🙏');
 });
 
 // **********************************************************
-// আপনার বের করা Session ID এখানে বসানো হলো
+// আপনার কপি করা Session ID (যেমন আছে তেমনই থাক)
 // **********************************************************
-const SESSION_ID = "79712128620%3AtQPz0VzkjZreXf%3A5%3AAYiK33MTyLQ9hTMpf5lt6pXhTAPaDn5gifALYQEUNg"; 
+const RAW_SESSION_ID = "79712128620%3AtQPz0VzkjZreXf%3A5%3AAYiK33MTyLQ9hTMpf5lt6pXhTAPaDn5gifALYQEUNg"; 
 // **********************************************************
 
+// সেশন আইডি ঠিক করার লজিক
+const REAL_SESSION_ID = decodeURIComponent(RAW_SESSION_ID);
+
 async function getInstagramData(url) {
-    console.log("🔍 Fetching:", url);
+    console.log("🔍 Fetching with Session ID:", REAL_SESSION_ID.substring(0, 10) + "...");
 
     const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-        'Cookie': `sessionid=${SESSION_ID};`, // জাদুকরী চাবি 🔑
+        'Cookie': `sessionid=${REAL_SESSION_ID};`, // এখন সঠিক আইডি যাবে
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
         'Sec-Fetch-Site': 'same-origin',
@@ -37,40 +40,53 @@ async function getInstagramData(url) {
         let videoUrl = null;
         let imageUrl = null;
 
-        // ১. ভিডিও খোঁজা (JSON এর ভেতর video_url থাকে)
+        // ১. video_url খোঁজা (JSON)
         const videoMatch = html.match(/"video_url":"([^"]+)"/);
         if (videoMatch && videoMatch[1]) {
-            videoUrl = videoMatch[1].replace(/\\u0026/g, '&');
+            videoUrl = videoMatch[1];
         }
 
-        // ২. যদি JSON এ না থাকে, মেটা ট্যাগ দেখা
+        // ২. og:video খোঁজা
         if (!videoUrl) {
             const metaMatch = html.match(/<meta property="og:video" content="([^"]+)"/i);
             if (metaMatch && metaMatch[1]) {
-                videoUrl = metaMatch[1].replace(/&amp;/g, '&');
+                videoUrl = metaMatch[1];
             }
         }
 
-        // ৩. ছবি খোঁজা
+        // ৩. Deep Search (video_versions) - রিলস এর জন্য শক্তিশালী
+        if (!videoUrl) {
+            const deepMatch = html.match(/"video_versions":\[\{"type":\d+,"url":"([^"]+)"/);
+            if (deepMatch && deepMatch[1]) {
+                videoUrl = deepMatch[1];
+            }
+        }
+
+        // ৪. ছবি খোঁজা
         const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
         if (imgMatch && imgMatch[1]) {
-            imageUrl = imgMatch[1].replace(/&amp;/g, '&');
+            imageUrl = imgMatch[1];
         }
 
         // রেজাল্ট তৈরি
         if (videoUrl) {
             console.log("✅ Video Found!");
-            return { type: 'video', video: videoUrl, thumbnail: imageUrl || "" };
+            // লিংক ক্লিন করা
+            videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+            imageUrl = imageUrl ? imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&') : "";
+            
+            return { type: 'video', video: videoUrl, thumbnail: imageUrl };
         } 
         else if (imageUrl) {
-            console.log("✅ Photo Found!");
+            console.log("⚠️ Only Photo Found. Check Session validity.");
+            imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             return { type: 'photo', video: imageUrl, thumbnail: imageUrl };
         } 
         else {
             if(html.includes("login")) {
-                throw new Error("Session ID Expired! Please update code.");
+                throw new Error("Session ID Expired or Invalid.");
             }
-            throw new Error("No media found. Account might be private.");
+            throw new Error("No media found.");
         }
 
     } catch (error) {
@@ -114,7 +130,7 @@ app.get('/stream', async (req, res) => {
         const ext = type === 'photo' ? 'jpg' : 'mp4';
         const contentType = type === 'photo' ? 'image/jpeg' : 'video/mp4';
 
-        res.setHeader('Content-Disposition', `attachment; filename="insta_${Date.now()}.mp4"`);
+        res.setHeader('Content-Disposition', `attachment; filename="insta_${Date.now()}.${ext}"`);
         res.setHeader('Content-Type', contentType);
         
         response.data.pipe(res);
