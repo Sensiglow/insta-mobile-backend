@@ -9,83 +9,99 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Master Bypass Server Running! Radhe Radhe! 🙏');
+    res.send('Session Master Server Running! Radhe Radhe! 🙏');
 });
 
-// ভিডিও আনার ফাংশন (Publer API ব্যবহার করে)
+// **********************************************************
+// ⚠️ এখানে আপনার আমেরিকান আইডির SESSION ID বসান
+// **********************************************************
+const RAW_SESSION_ID = "79630939794:kzcTqdY4zvT8vX:27:AYj0BSlNTQ_SRrB57qq-6Pp42Yu7caxHu32PfgVUwA"; 
+// **********************************************************
+
+// অটোমেটিক ডিকোড (যদি ভুল ফরম্যাট থাকেও, ঠিক করে নেবে)
+const REAL_SESSION_ID = decodeURIComponent(RAW_SESSION_ID);
+
 async function getInstagramData(url) {
-    console.log("🚀 Requesting via Publer (Bypass Logic):", url);
+    console.log("🔍 Fetching with Session ID...", url);
+
+    // ১. লিংক ক্লিন করা
+    let cleanUrl = url.split('?')[0].replace(/\/$/, '');
+    
+    // ২. জাদুকরী API লিংক তৈরি (HTML নয়, সরাসরি JSON চাইব)
+    const jsonUrl = `${cleanUrl}/?__a=1&__d=dis`;
+
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+        'Cookie': `sessionid=${REAL_SESSION_ID};`,
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-Mode': 'cors'
+    };
 
     try {
-        // ১. Publer API তে রিকোয়েস্ট পাঠানো (এরা ইনস্টাগ্রাম ব্লক খায় না)
-        const response = await axios.post('https://app.publer.io/hooks/media', {
-            url: url,
-            iphone: false
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Referer': 'https://publer.io/',
-                'Origin': 'https://publer.io',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        });
-
+        const response = await axios.get(jsonUrl, { headers });
         const data = response.data;
 
-        // ২. ডেটা চেক করা
-        if (data.payload && data.payload.length > 0) {
-            const media = data.payload[0];
+        // ৩. ডেটাবেস থেকে ভিডিও খোঁজা
+        let videoUrl = null;
+        let imageUrl = null;
+        let items = null;
+
+        // ডেটা স্ট্রাকচার চেক
+        if (data.items) {
+            items = data.items[0];
+        } else if (data.graphql && data.graphql.shortcode_media) {
+            items = data.graphql.shortcode_media;
+        }
+
+        if (!items) throw new Error("Invalid JSON response.");
+
+        // ৪. ভিডিও বের করা (সবচেয়ে জরুরি পার্ট)
+        if (items.video_versions && items.video_versions.length > 0) {
+            // ভিডিও পাওয়া গেছে!
+            videoUrl = items.video_versions[0].url; 
+            console.log("✅ Video found in JSON!");
+        } 
+        else if (items.is_video && items.video_url) {
+            videoUrl = items.video_url;
+            console.log("✅ Video found via direct key!");
+        }
+
+        // ছবি খোঁজা (ব্যাকআপ)
+        if (items.image_versions2 && items.image_versions2.candidates) {
+            imageUrl = items.image_versions2.candidates[0].url;
+        } else if (items.display_url) {
+            imageUrl = items.display_url;
+        }
+
+        // ৫. রেজাল্ট রিটার্ন
+        if (videoUrl) {
+            // লিংক ক্লিন করা
+            videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+            imageUrl = imageUrl ? imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&') : "";
             
-            console.log("✅ Success! Video found via Publer.");
-            
-            // ভিডিও না ছবি চেক করা
-            if (media.type === 'video' || media.path.includes('.mp4')) {
-                return { 
-                    type: 'video', 
-                    video: media.path, 
-                    thumbnail: media.thumbnail 
-                };
-            } else {
-                return { 
-                    type: 'photo', 
-                    video: media.path, 
-                    thumbnail: media.path 
-                };
-            }
-        } else {
-            throw new Error("Publer could not fetch data.");
+            // টাইপ 'video' পাঠানো হচ্ছে (যাতে ফ্রন্টএন্ড ভিডিও বাটন দেখায়)
+            return { type: 'video', video: videoUrl, thumbnail: imageUrl };
+        } 
+        else if (imageUrl) {
+            console.log("⚠️ JSON confirmed it's a Photo.");
+            imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+            return { type: 'photo', video: imageUrl, thumbnail: imageUrl };
+        } 
+        else {
+            throw new Error("No media found in JSON.");
         }
 
     } catch (error) {
-        console.error("❌ Publer Failed, trying Backup (Cobalt)...");
-        // যদি Publer ফেইল করে, তখন Cobalt ট্রাই করবে
-        return await getFromCobalt(url);
-    }
-}
-
-// ব্যাকআপ ফাংশন (Cobalt)
-async function getFromCobalt(url) {
-    const backupServer = 'https://api.wuk.sh/api/json';
-    try {
-        const response = await axios.post(backupServer, {
-            url: url,
-            vCodec: "h264",
-            vQuality: "720",
-            isAudioOnly: false
-        }, {
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
-        });
-
-        const data = response.data;
-        if (data.status === 'stream' || data.status === 'redirect') {
-            console.log("✅ Success from Cobalt Backup!");
-            return { type: 'video', video: data.url, thumbnail: "" };
-        } else if (data.status === 'picker') {
-             return { type: 'video', video: data.picker[0].url, thumbnail: "" };
+        console.error("❌ Session Method Failed:", error.message);
+        
+        if (error.response && error.response.status === 302) {
+            throw new Error("Session ID Expired (Login Required). Please update ID.");
         }
-        throw new Error("Backup failed too.");
-    } catch (e) {
-        throw new Error("All methods failed. Instagram is highly strict today.");
+        
+        throw new Error("Failed to fetch. Instagram blocked request.");
     }
 }
 
@@ -100,11 +116,11 @@ app.post('/download', async (req, res) => {
             data: result
         });
     } catch (error) {
-        res.status(500).json({ success: false, error: "Server Busy. Try again later." });
+        res.status(500).json({ success: false, error: "Server Error: " + error.message });
     }
 });
 
-// ডাইরেক্ট ডাউনলোড স্ট্রিম
+// ডাইরেক্ট ডাউনলোড স্ট্রিম (0kb ফিক্স + ফাস্ট ডাউনলোড)
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
     const type = req.query.type || 'video';
@@ -117,8 +133,7 @@ app.get('/stream', async (req, res) => {
             method: 'GET',
             responseType: 'stream',
             headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Referer': 'https://instagram.com'
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)' 
             }
         });
 
