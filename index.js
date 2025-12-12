@@ -9,99 +9,93 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Session Master Server Running! Radhe Radhe! 🙏');
+    res.send('Mobile App Server Running! Radhe Radhe! 🙏');
 });
 
 // **********************************************************
-// ⚠️ এখানে আপনার আমেরিকান আইডির SESSION ID বসান
+// আপনার আমেরিকান Session ID
 // **********************************************************
 const RAW_SESSION_ID = "79630939794:kzcTqdY4zvT8vX:27:AYj0BSlNTQ_SRrB57qq-6Pp42Yu7caxHu32PfgVUwA"; 
 // **********************************************************
 
-// অটোমেটিক ডিকোড (যদি ভুল ফরম্যাট থাকেও, ঠিক করে নেবে)
 const REAL_SESSION_ID = decodeURIComponent(RAW_SESSION_ID);
 
-async function getInstagramData(url) {
-    console.log("🔍 Fetching with Session ID...", url);
+// ১. লিংক থেকে শর্টকোড (Shortcode) বের করার ফাংশন
+function getShortcode(url) {
+    // লিংকের ভেতর থেকে p/ বা reel/ এর পরের অংশ নেওয়া
+    const regex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/;
+    const match = url.match(regex);
+    return match ? match[1] : null;
+}
 
-    // ১. লিংক ক্লিন করা
-    let cleanUrl = url.split('?')[0].replace(/\/$/, '');
-    
-    // ২. জাদুকরী API লিংক তৈরি (HTML নয়, সরাসরি JSON চাইব)
-    const jsonUrl = `${cleanUrl}/?__a=1&__d=dis`;
+// ২. মোবাইল অ্যাপ সেজে ভিডিও আনার ফাংশন
+async function getInstagramData(url) {
+    const shortcode = getShortcode(url);
+    console.log("🔍 Target Shortcode:", shortcode);
+
+    if (!shortcode) throw new Error("Invalid Instagram Link");
+
+    // মোবাইল অ্যাপের গোপন API লিংক
+    const apiUrl = `https://i.instagram.com/api/v1/media/info?shortcode=${shortcode}`;
 
     const headers = {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+        // আমরা সাজব Samsung Galaxy S9 ফোন (যাতে ব্লক না করে)
+        'User-Agent': 'Instagram 219.0.0.12.117 Android (28/9.0; 420dpi; 1080x1920; samsung; SM-G950F; dreamlte; samsungexynos8895; en_US; 336097754)',
         'Cookie': `sessionid=${REAL_SESSION_ID};`,
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Sec-Fetch-Site': 'same-origin',
-        'Sec-Fetch-Mode': 'cors'
+        'Accept-Language': 'en-US',
+        'X-IG-App-ID': '936619743392459'
     };
 
     try {
-        const response = await axios.get(jsonUrl, { headers });
+        const response = await axios.get(apiUrl, { headers });
         const data = response.data;
 
-        // ৩. ডেটাবেস থেকে ভিডিও খোঁজা
+        // ডেটা চেক করা (Mobile API Response)
+        if (!data.items || data.items.length === 0) {
+            throw new Error("No media found in Mobile API");
+        }
+
+        const item = data.items[0];
         let videoUrl = null;
         let imageUrl = null;
-        let items = null;
 
-        // ডেটা স্ট্রাকচার চেক
-        if (data.items) {
-            items = data.items[0];
-        } else if (data.graphql && data.graphql.shortcode_media) {
-            items = data.graphql.shortcode_media;
-        }
-
-        if (!items) throw new Error("Invalid JSON response.");
-
-        // ৪. ভিডিও বের করা (সবচেয়ে জরুরি পার্ট)
-        if (items.video_versions && items.video_versions.length > 0) {
-            // ভিডিও পাওয়া গেছে!
-            videoUrl = items.video_versions[0].url; 
-            console.log("✅ Video found in JSON!");
+        // ভিডিও খোঁজা (Video Versions)
+        if (item.video_versions && item.video_versions.length > 0) {
+            videoUrl = item.video_versions[0].url; // সেরা কোয়ালিটি (Type 101)
+            console.log("✅ Video found via Mobile API!");
         } 
-        else if (items.is_video && items.video_url) {
-            videoUrl = items.video_url;
-            console.log("✅ Video found via direct key!");
+        
+        // ক্যারোসেল (একাধিক স্লাইড) হলে প্রথম ভিডিও নেওয়া
+        else if (item.carousel_media) {
+            const firstMedia = item.carousel_media[0];
+            if (firstMedia.video_versions) {
+                videoUrl = firstMedia.video_versions[0].url;
+            } else {
+                imageUrl = firstMedia.image_versions2.candidates[0].url;
+            }
         }
 
-        // ছবি খোঁজা (ব্যাকআপ)
-        if (items.image_versions2 && items.image_versions2.candidates) {
-            imageUrl = items.image_versions2.candidates[0].url;
-        } else if (items.display_url) {
-            imageUrl = items.display_url;
+        // ছবি বের করা (ব্যাকআপ)
+        if (item.image_versions2 && item.image_versions2.candidates) {
+            imageUrl = item.image_versions2.candidates[0].url;
         }
 
-        // ৫. রেজাল্ট রিটার্ন
+        // রেজাল্ট রিটার্ন
         if (videoUrl) {
-            // লিংক ক্লিন করা
-            videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-            imageUrl = imageUrl ? imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&') : "";
-            
-            // টাইপ 'video' পাঠানো হচ্ছে (যাতে ফ্রন্টএন্ড ভিডিও বাটন দেখায়)
-            return { type: 'video', video: videoUrl, thumbnail: imageUrl };
+            // লিংক ক্লিন করা (না করলেও চলে, তবু সেফটির জন্য)
+            videoUrl = videoUrl.replace(/^http:/, 'https:'); 
+            return { type: 'video', video: videoUrl, thumbnail: imageUrl || "" };
         } 
         else if (imageUrl) {
-            console.log("⚠️ JSON confirmed it's a Photo.");
-            imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             return { type: 'photo', video: imageUrl, thumbnail: imageUrl };
         } 
         else {
-            throw new Error("No media found in JSON.");
+            throw new Error("API returned no usable media.");
         }
 
     } catch (error) {
-        console.error("❌ Session Method Failed:", error.message);
-        
-        if (error.response && error.response.status === 302) {
-            throw new Error("Session ID Expired (Login Required). Please update ID.");
-        }
-        
-        throw new Error("Failed to fetch. Instagram blocked request.");
+        console.error("❌ Mobile API Failed:", error.message);
+        throw new Error("Failed to fetch from Instagram App API.");
     }
 }
 
@@ -111,16 +105,13 @@ app.post('/download', async (req, res) => {
 
     try {
         const result = await getInstagramData(url);
-        res.json({
-            success: true,
-            data: result
-        });
+        res.json({ success: true, data: result });
     } catch (error) {
         res.status(500).json({ success: false, error: "Server Error: " + error.message });
     }
 });
 
-// ডাইরেক্ট ডাউনলোড স্ট্রিম (0kb ফিক্স + ফাস্ট ডাউনলোড)
+// ডাইরেক্ট ডাউনলোড স্ট্রিম
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
     const type = req.query.type || 'video';
@@ -133,7 +124,7 @@ app.get('/stream', async (req, res) => {
             method: 'GET',
             responseType: 'stream',
             headers: { 
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)' 
+                'User-Agent': 'Instagram 219.0.0.12.117 Android (28/9.0; 420dpi; 1080x1920; samsung; SM-G950F)' 
             }
         });
 
