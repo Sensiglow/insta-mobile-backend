@@ -9,7 +9,7 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-    res.send('Mobile App Server Running! Radhe Radhe! 🙏');
+    res.send('GraphQL Server Running! Radhe Radhe! 🙏');
 });
 
 // **********************************************************
@@ -20,82 +20,72 @@ const RAW_SESSION_ID = "79630939794:kzcTqdY4zvT8vX:27:AYj0BSlNTQ_SRrB57qq-6Pp42Y
 
 const REAL_SESSION_ID = decodeURIComponent(RAW_SESSION_ID);
 
-// ১. লিংক থেকে শর্টকোড (Shortcode) বের করার ফাংশন
+// শর্টকোড বের করার ফাংশন
 function getShortcode(url) {
-    // লিংকের ভেতর থেকে p/ বা reel/ এর পরের অংশ নেওয়া
     const regex = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/;
     const match = url.match(regex);
     return match ? match[1] : null;
 }
 
-// ২. মোবাইল অ্যাপ সেজে ভিডিও আনার ফাংশন
 async function getInstagramData(url) {
     const shortcode = getShortcode(url);
-    console.log("🔍 Target Shortcode:", shortcode);
+    console.log("🔍 Target GraphQL Shortcode:", shortcode);
 
-    if (!shortcode) throw new Error("Invalid Instagram Link");
+    if (!shortcode) throw new Error("Invalid Link");
 
-    // মোবাইল অ্যাপের গোপন API লিংক
-    const apiUrl = `https://i.instagram.com/api/v1/media/info?shortcode=${shortcode}`;
+    // GraphQL এর জাদুকরী লিংক
+    // doc_id=8845758582119845 এটা ইনস্টাগ্রামের গোপন আইডি যা ভিডিও ডেটা দেয়
+    const graphqlUrl = `https://www.instagram.com/graphql/query/?doc_id=8845758582119845&variables={"shortcode":"${shortcode}"}`;
 
     const headers = {
-        // আমরা সাজব Samsung Galaxy S9 ফোন (যাতে ব্লক না করে)
-        'User-Agent': 'Instagram 219.0.0.12.117 Android (28/9.0; 420dpi; 1080x1920; samsung; SM-G950F; dreamlte; samsungexynos8895; en_US; 336097754)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Cookie': `sessionid=${REAL_SESSION_ID};`,
-        'Accept-Language': 'en-US',
-        'X-IG-App-ID': '936619743392459'
+        'X-IG-App-ID': '936619743392459',
+        'Sec-Fetch-Site': 'same-origin'
     };
 
     try {
-        const response = await axios.get(apiUrl, { headers });
+        const response = await axios.get(graphqlUrl, { headers });
         const data = response.data;
 
-        // ডেটা চেক করা (Mobile API Response)
-        if (!data.items || data.items.length === 0) {
-            throw new Error("No media found in Mobile API");
+        if (!data.data || !data.data.xdt_shortcode_media) {
+            throw new Error("GraphQL returned empty data.");
         }
 
-        const item = data.items[0];
+        const media = data.data.xdt_shortcode_media;
         let videoUrl = null;
         let imageUrl = null;
 
-        // ভিডিও খোঁজা (Video Versions)
-        if (item.video_versions && item.video_versions.length > 0) {
-            videoUrl = item.video_versions[0].url; // সেরা কোয়ালিটি (Type 101)
-            console.log("✅ Video found via Mobile API!");
-        } 
-        
-        // ক্যারোসেল (একাধিক স্লাইড) হলে প্রথম ভিডিও নেওয়া
-        else if (item.carousel_media) {
-            const firstMedia = item.carousel_media[0];
-            if (firstMedia.video_versions) {
-                videoUrl = firstMedia.video_versions[0].url;
-            } else {
-                imageUrl = firstMedia.image_versions2.candidates[0].url;
-            }
+        // ভিডিও খোঁজা
+        if (media.video_url) {
+            videoUrl = media.video_url;
+            console.log("✅ Video found via GraphQL!");
         }
 
-        // ছবি বের করা (ব্যাকআপ)
-        if (item.image_versions2 && item.image_versions2.candidates) {
-            imageUrl = item.image_versions2.candidates[0].url;
+        // ছবি খোঁজা
+        if (media.display_url) {
+            imageUrl = media.display_url;
         }
 
         // রেজাল্ট রিটার্ন
         if (videoUrl) {
-            // লিংক ক্লিন করা (না করলেও চলে, তবু সেফটির জন্য)
-            videoUrl = videoUrl.replace(/^http:/, 'https:'); 
-            return { type: 'video', video: videoUrl, thumbnail: imageUrl || "" };
+            // লিংক ক্লিন করা
+            videoUrl = videoUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
+            imageUrl = imageUrl ? imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&') : "";
+            
+            return { type: 'video', video: videoUrl, thumbnail: imageUrl };
         } 
         else if (imageUrl) {
+            imageUrl = imageUrl.replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
             return { type: 'photo', video: imageUrl, thumbnail: imageUrl };
         } 
         else {
-            throw new Error("API returned no usable media.");
+            throw new Error("No media found.");
         }
 
     } catch (error) {
-        console.error("❌ Mobile API Failed:", error.message);
-        throw new Error("Failed to fetch from Instagram App API.");
+        console.error("❌ GraphQL Failed:", error.message);
+        throw new Error("Instagram Blocked Request.");
     }
 }
 
@@ -111,11 +101,10 @@ app.post('/download', async (req, res) => {
     }
 });
 
-// ডাইরেক্ট ডাউনলোড স্ট্রিম
+// ডাইরেক্ট স্ট্রিম
 app.get('/stream', async (req, res) => {
     const fileUrl = req.query.url;
     const type = req.query.type || 'video';
-    
     if (!fileUrl) return res.status(400).send("No URL");
 
     try {
@@ -123,9 +112,7 @@ app.get('/stream', async (req, res) => {
             url: fileUrl,
             method: 'GET',
             responseType: 'stream',
-            headers: { 
-                'User-Agent': 'Instagram 219.0.0.12.117 Android (28/9.0; 420dpi; 1080x1920; samsung; SM-G950F)' 
-            }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
 
         const ext = type === 'photo' ? 'jpg' : 'mp4';
@@ -133,9 +120,7 @@ app.get('/stream', async (req, res) => {
 
         res.setHeader('Content-Disposition', `attachment; filename="insta_${Date.now()}.${ext}"`);
         res.setHeader('Content-Type', contentType);
-        
         response.data.pipe(res);
-
     } catch (error) {
         res.status(500).send("Stream Error");
     }
